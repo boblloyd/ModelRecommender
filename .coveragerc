@@ -22,7 +22,7 @@ precision = 1
 
 # Fail the coverage run if total drops below this threshold.
 # Raise this as the test suite grows.
-fail_under = 70
+fail_under = 80
 
 [html]
 directory = htmlcov

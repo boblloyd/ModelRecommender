@@ -8,6 +8,51 @@
 
 ---
 
+## CI pipeline (GitHub Actions)
+
+The workflow at [`.github/workflows/test.yml`](.github/workflows/test.yml) runs automatically on every push and pull request to `main` or `dev`.
+
+### What it does
+
+| Step | Tool | Where to see the output |
+|---|---|---|
+| Run tests + measure coverage | `pytest --cov` | Actions → job log |
+| Coverage summary table | `coverage report --format=markdown` | Actions → job → **Summary** tab |
+| Pass / fail / skip counts | `EnricoMi/publish-unit-test-result-action` | PR page → **Checks** tab |
+| Failing test annotations | same action | PR page → **Files changed** diff |
+| Coverage badge + file table | `py-cov-action/python-coverage-comment-action` | PR page → comment thread |
+| Full HTML report (downloadable) | `actions/upload-artifact` | Actions → run → **Artifacts** |
+
+### Coverage gate
+
+The pipeline fails if total branch coverage drops below **80%** (`fail_under = 80` in `.coveragerc`).
+Reports are still generated and uploaded on failure so you can see exactly what dropped.
+
+Badge colours on PRs:
+
+| Colour | Meaning |
+|---|---|
+| 🟢 Green | ≥ 80% — pipeline passes |
+| 🟡 Orange | 70–79% — pipeline **fails** |
+| 🔴 Red | < 70% — pipeline **fails** |
+
+### Required repository permissions
+
+The workflow uses `GITHUB_TOKEN` (automatically provided by GitHub — no setup needed).
+The token needs these permissions, which are declared in the workflow file:
+
+```
+contents: read        # checkout
+pull-requests: write  # post/update coverage comment
+checks: write         # publish test results check run
+```
+
+For **public repos** these are granted automatically. For **private repos** go to:
+`Settings → Actions → General → Workflow permissions` and confirm
+*"Read and write permissions"* is selected (or GitHub will prompt you on first run).
+
+---
+
 ## Local development setup
 
 The fastest way to run the stack locally is docker-compose, which starts PostgreSQL and the API together.
