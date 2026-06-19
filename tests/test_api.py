@@ -6,13 +6,15 @@ or network access occurs. ASGITransport does not trigger lifespan,
 so app.state.pool and the _get_pool dependency override are set directly.
 """
 
-from unittest.mock import AsyncMock, patch
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
-from api.main import _get_pool, app
+from api.main import _dispatch_job, _get_pool, app
 from tests.conftest import make_db_model
 
 
@@ -230,3 +232,68 @@ async def test_cache_update_forces_incremental_mode(client, mock_conn):
         await client.post("/cache/update", json={"base_model": "Flux.1 D", "mode": "full"})
 
     assert captured["mode"] == "incremental"
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_job — Kubernetes job dispatch (direct unit tests)
+# ---------------------------------------------------------------------------
+
+def _make_k8s_modules():
+    """
+    Return a sys.modules patch dict with mocked kubernetes package so
+    _dispatch_job's internal `from kubernetes import ...` calls get mocks.
+    """
+    class ConfigException(Exception):
+        pass
+
+    k8s_config = MagicMock()
+    k8s_config.ConfigException = ConfigException
+
+    k8s_client = MagicMock()
+
+    kubernetes_mod = MagicMock()
+    kubernetes_mod.client = k8s_client
+    kubernetes_mod.config = k8s_config
+
+    modules = {
+        "kubernetes": kubernetes_mod,
+        "kubernetes.client": k8s_client,
+        "kubernetes.config": k8s_config,
+    }
+    return modules, k8s_client, k8s_config, ConfigException
+
+
+def test_dispatch_job_creates_k8s_job_and_returns_job_created():
+    modules, k8s_client, k8s_config, _ = _make_k8s_modules()
+
+    with patch.dict(sys.modules, modules):
+        result = _dispatch_job("Flux.1 D", "full")
+
+    assert result["status"] == "job_created"
+    assert result["base_model"] == "Flux.1 D"
+    assert result["mode"] == "full"
+    assert "job_name" in result
+    k8s_client.BatchV1Api.return_value.create_namespaced_job.assert_called_once()
+
+
+def test_dispatch_job_falls_back_to_kube_config_outside_cluster():
+    modules, k8s_client, k8s_config, ConfigException = _make_k8s_modules()
+    k8s_config.load_incluster_config.side_effect = ConfigException("not in cluster")
+
+    with patch.dict(sys.modules, modules):
+        result = _dispatch_job("Flux.1 D", "incremental")
+
+    k8s_config.load_kube_config.assert_called_once()
+    assert result["status"] == "job_created"
+
+
+def test_dispatch_job_raises_500_when_k8s_api_call_fails():
+    modules, k8s_client, k8s_config, _ = _make_k8s_modules()
+    k8s_client.BatchV1Api.return_value.create_namespaced_job.side_effect = RuntimeError("k8s error")
+
+    with patch.dict(sys.modules, modules):
+        with pytest.raises(HTTPException) as exc_info:
+            _dispatch_job("Flux.1 D", "full")
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to create crawl Job" in exc_info.value.detail

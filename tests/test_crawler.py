@@ -153,6 +153,11 @@ def test_extract_record_checkpoint_type():
     assert r["civitai_version_id"] == 11111
 
 
+def test_extract_record_missing_model_id_returns_none():
+    item = {k: v for k, v in CIVITAI_LORA.items() if k != "id"}
+    assert _extract_record(item) is None
+
+
 # ---------------------------------------------------------------------------
 # full_crawl
 # ---------------------------------------------------------------------------
@@ -205,6 +210,30 @@ async def test_full_crawl_marks_base_model_index_complete(respx_mock, mock_pool,
     final_sql = mock_conn.execute.call_args_list[-1][0][0]
     assert "crawl_complete" in final_sql
     assert "TRUE" in final_sql
+
+
+async def test_full_crawl_retries_on_request_error(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(side_effect=[
+        httpx.ConnectError("connection refused"),
+        httpx.Response(200, json=api_page([CIVITAI_LORA])),
+    ])
+
+    with patch("asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        count = await full_crawl("Flux.1 D", mock_pool)
+
+    assert count == 1
+    mock_sleep.assert_called_once()
+
+
+async def test_full_crawl_sends_auth_header_when_token_set(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
+        return_value=httpx.Response(200, json=api_page([]))
+    )
+
+    with patch.dict("os.environ", {"CIVITAI_API_TOKEN": "test-token-xyz"}):
+        await full_crawl("Flux.1 D", mock_pool)
+
+    assert respx_mock.calls[0].request.headers["Authorization"] == "Bearer test-token-xyz"
 
 
 async def test_full_crawl_retries_on_429_rate_limit(respx_mock, mock_pool, mock_conn):
