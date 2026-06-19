@@ -1,0 +1,17 @@
+# NodePort service — exposes the API on port 30765 of the Ubuntu node.
+# Access via:  http://<node-ip>:30765
+# Swagger UI:  http://<node-ip>:30765/docs
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-recommender-api
+  namespace: model-recommender
+spec:
+  selector:
+    app: model-recommender-api
+  type: NodePort
+  ports:
+    - name: http
+      port: 8765
+      targetPort: 8765
+      nodePort: 30765

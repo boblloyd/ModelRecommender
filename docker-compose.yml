@@ -1,0 +1,69 @@
+# Local development stack.
+# Uses the same image for both the API and ad-hoc crawler runs.
+#
+# Start the API:
+#   docker compose up -d
+#
+# Run a full crawl (one-shot, exits when done):
+#   CRAWL_BASE_MODEL="Flux.1 D" docker compose --profile crawl run --rm crawler
+#
+# Run an incremental update:
+#   CRAWL_BASE_MODEL="Flux.1 D" CRAWL_MODE=incremental docker compose --profile crawl run --rm crawler
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recommender
+      POSTGRES_PASSWORD: recommender
+      POSTGRES_DB: model_catalog
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recommender"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      DATABASE_URL: postgresql://recommender:recommender@postgres:5432/model_catalog
+      CIVITAI_API_TOKEN: ${CIVITAI_API_TOKEN}
+      HF_TOKEN: ${HF_TOKEN:-}
+      # Ollama runs on the host with GPU access — reach it via host.docker.internal
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_MODEL_PRIMARY: ${OLLAMA_MODEL_PRIMARY:-dolphin3.0-llama3.1:8b}
+      OLLAMA_MODEL_FALLBACK: ${OLLAMA_MODEL_FALLBACK:-gemma3:12b}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Mount source so changes reflect without rebuilding (dev only)
+      - .:/app
+
+  # Profile-gated crawler: starts on demand, exits when done.
+  # In production, this role is played by a Kubernetes Job.
+  crawler:
+    build: .
+    profiles: ["crawl"]
+    environment:
+      DATABASE_URL: postgresql://recommender:recommender@postgres:5432/model_catalog
+      CIVITAI_API_TOKEN: ${CIVITAI_API_TOKEN}
+      CRAWL_PAGE_SIZE: ${CRAWL_PAGE_SIZE:-100}
+      RATE_LIMIT_BACKOFF_START: ${RATE_LIMIT_BACKOFF_START:-2}
+      RATE_LIMIT_BACKOFF_MAX: ${RATE_LIMIT_BACKOFF_MAX:-30}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      python -m crawler.civitai_crawler
+      --base-model "${CRAWL_BASE_MODEL:-Flux.1 D}"
+      --mode "${CRAWL_MODE:-full}"

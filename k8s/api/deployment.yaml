@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-recommender-api
+  namespace: model-recommender
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-recommender-api
+  template:
+    metadata:
+      labels:
+        app: model-recommender-api
+    spec:
+      serviceAccountName: model-recommender-api
+      containers:
+        - name: api
+          image: model-recommender:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8765
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: database-url
+            - name: CIVITAI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: civitai-api-token
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: hf-token
+          envFrom:
+            - configMapRef:
+                name: model-recommender-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8765
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8765
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

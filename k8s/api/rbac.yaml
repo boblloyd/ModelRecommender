@@ -1,0 +1,32 @@
+# ServiceAccount used by the API pod.
+# The Role gives it permission to create/inspect crawler Jobs within the namespace.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: model-recommender-api
+  namespace: model-recommender
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: crawler-job-manager
+  namespace: model-recommender
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-crawler-job-manager
+  namespace: model-recommender
+subjects:
+  - kind: ServiceAccount
+    name: model-recommender-api
+    namespace: model-recommender
+roleRef:
+  kind: Role
+  name: crawler-job-manager
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+k8s/secret.yaml
+
+# Database
+data/
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Model weights (if accidentally placed here)
+*.safetensors
+*.ckpt
+*.pt

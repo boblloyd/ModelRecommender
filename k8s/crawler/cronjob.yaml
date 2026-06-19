@@ -1,0 +1,58 @@
+# CronJob for scheduled incremental updates.
+# Runs every 6 hours; creates an ephemeral Job pod that exits when done.
+# Requires: a completed full crawl first (run job.yaml or POST /cache/crawl).
+#
+# Manage:
+#   kubectl get cronjobs -n model-recommender
+#   kubectl get jobs -n model-recommender        # see running/completed Job instances
+#   kubectl create job --from=cronjob/civitai-incremental-update manual-run -n model-recommender
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: civitai-incremental-update
+  namespace: model-recommender
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid         # skip if previous Job is still running
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: crawler
+              image: model-recommender:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - -m
+                - crawler.civitai_crawler
+                - --base-model
+                - "Flux.1 D"
+                - --mode
+                - incremental
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: model-recommender-secrets
+                      key: database-url
+                - name: CIVITAI_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: model-recommender-secrets
+                      key: civitai-api-token
+              envFrom:
+                - configMapRef:
+                    name: model-recommender-config
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"

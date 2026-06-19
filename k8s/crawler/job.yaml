@@ -1,0 +1,53 @@
+# One-off full crawl Job.
+# Edit BASE_MODEL before applying, then:
+#   kubectl apply -f k8s/crawler/job.yaml
+#
+# The crawler pod starts, runs to completion, and shuts down automatically.
+# Logs:  kubectl logs -n model-recommender -l job-name=civitai-crawl-flux1d -f
+# Status: kubectl get jobs -n model-recommender
+#
+# The Job and its pod are auto-deleted 1 hour after completion (ttlSecondsAfterFinished).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: civitai-crawl-flux1d
+  namespace: model-recommender
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: crawler
+          image: model-recommender:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - crawler.civitai_crawler
+            - --base-model
+            - "Flux.1 D"
+            - --mode
+            - full
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: database-url
+            - name: CIVITAI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: civitai-api-token
+          envFrom:
+            - configMapRef:
+                name: model-recommender-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

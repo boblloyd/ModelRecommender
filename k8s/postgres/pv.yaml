@@ -1,0 +1,22 @@
+# PersistentVolume backed by a directory on the Ubuntu host.
+# Data survives pod cycling, redeployments, and database container restarts.
+#
+# Ensure the directory exists on the host before applying:
+#   sudo mkdir -p /data/model-recommender/postgres
+#   sudo chown 999:999 /data/model-recommender/postgres   # postgres container UID
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-pv
+  labels:
+    app: postgres
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
+  hostPath:
+    path: /data/model-recommender/postgres
+    type: DirectoryOrCreate
