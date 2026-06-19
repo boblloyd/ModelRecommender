@@ -169,12 +169,13 @@ async def test_full_crawl_single_page_upserts_all_records(respx_mock, mock_pool,
 
 
 async def test_full_crawl_follows_next_page_url(respx_mock, mock_pool, mock_conn):
-    respx_mock.get(CIVITAI_MODELS_URL).mock(
-        return_value=httpx.Response(200, json=api_page([CIVITAI_LORA], next_url=PAGE_2_URL))
-    )
-    respx_mock.get(PAGE_2_URL).mock(
-        return_value=httpx.Response(200, json=api_page([CIVITAI_CHECKPOINT]))
-    )
+    # Two separate routes won't work: CIVITAI_MODELS_URL (no query params) also
+    # matches PAGE_2_URL requests, causing an infinite loop. Use side_effect list
+    # so the single route returns responses in call order regardless of URL.
+    respx_mock.get(CIVITAI_MODELS_URL).mock(side_effect=[
+        httpx.Response(200, json=api_page([CIVITAI_LORA], next_url=PAGE_2_URL)),
+        httpx.Response(200, json=api_page([CIVITAI_CHECKPOINT])),
+    ])
 
     count = await full_crawl("Flux.1 D", mock_pool)
 

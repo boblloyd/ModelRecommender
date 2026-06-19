@@ -158,7 +158,7 @@ async def recommend(
         )
 
     # Phase 1: split the prompt into search tags directly (LLM intent parser is Phase 2)
-    search_tags = [w.strip(".,!?;:\"'") for w in req.prompt.lower().split() if len(w) > 2]
+    search_tags = [w.strip(".,!?;:\"'") for w in req.prompt.lower().split() if len(w) > 3]
 
     results = await query_catalog(
         search_tags=search_tags,
