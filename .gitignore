@@ -30,6 +30,12 @@ Thumbs.db
 *.log
 logs/
 
+# Test coverage artifacts
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
 # Model weights (if accidentally placed here)
 *.safetensors
 *.ckpt

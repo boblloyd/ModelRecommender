@@ -1,0 +1,32 @@
+[run]
+# Measure branch coverage in addition to line coverage.
+# Branch coverage catches untested conditional paths (e.g. "if token:" where
+# only the True branch was exercised).
+branch = true
+source =
+    api
+    agents
+    crawler
+    db
+
+omit =
+    # Phase 2 stubs — not yet implemented, no tests yet
+    output/*
+    # Empty package markers
+    */__init__.py
+
+[report]
+show_missing = true
+skip_covered = false
+precision = 1
+
+# Fail the coverage run if total drops below this threshold.
+# Raise this as the test suite grows.
+fail_under = 70
+
+[html]
+directory = htmlcov
+title = Model Recommender — Coverage Report
+
+[xml]
+output = coverage.xml
