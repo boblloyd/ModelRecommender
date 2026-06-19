@@ -132,12 +132,35 @@ async def test_recommend_passes_prompt_words_as_search_tags(client):
             json={"prompt": "sword fight in the rain", "base_model": "Flux.1 D"},
         )
 
-    # Short words ("in", "the") should be filtered; remaining words become tags
     assert "sword" in captured["tags"]
     assert "fight" in captured["tags"]
     assert "rain" in captured["tags"]
     assert "in" not in captured["tags"]
     assert "the" not in captured["tags"]
+
+
+async def test_recommend_stop_words_filtered_regardless_of_length(client):
+    """Stop words like 'with', 'from', 'they' are 4+ chars but must still be dropped."""
+    captured = {}
+
+    async def capture_catalog(search_tags, pool, **kwargs):
+        captured["tags"] = search_tags
+        return {"checkpoints": [], "loras": []}
+
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.query_catalog", side_effect=capture_catalog),
+    ):
+        await client.post(
+            "/recommend",
+            json={"prompt": "dark fantasy character with sword", "base_model": "Flux.1 D"},
+        )
+
+    assert "dark" in captured["tags"]
+    assert "fantasy" in captured["tags"]
+    assert "character" in captured["tags"]
+    assert "sword" in captured["tags"]
+    assert "with" not in captured["tags"]
 
 
 async def test_recommend_nsfw_filter_propagated(client):

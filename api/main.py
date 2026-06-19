@@ -65,6 +65,21 @@ async def _get_pool(request: Request) -> asyncpg.Pool:
     return request.app.state.pool
 
 
+# English function words that carry no semantic signal for model search.
+# Phase 2 replaces this list with LLM-based intent parsing.
+_STOP_WORDS = frozenset({
+    "a", "an", "the",
+    "and", "or", "but", "not", "nor",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from",
+    "is", "are", "was", "were", "be", "been", "being",
+    "it", "its", "this", "that", "these", "those",
+    "as", "so", "if", "do", "did", "has", "have", "had",
+    "i", "me", "my", "we", "our", "you", "your",
+    "he", "she", "they", "them", "his", "her", "their",
+    "into", "onto", "upon", "up", "out", "no", "go",
+})
+
+
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -158,7 +173,11 @@ async def recommend(
         )
 
     # Phase 1: split the prompt into search tags directly (LLM intent parser is Phase 2)
-    search_tags = [w.strip(".,!?;:\"'") for w in req.prompt.lower().split() if len(w) > 3]
+    search_tags = [
+        word
+        for w in req.prompt.lower().split()
+        if (word := w.strip(".,!?;:\"'")) and word not in _STOP_WORDS
+    ]
 
     results = await query_catalog(
         search_tags=search_tags,
