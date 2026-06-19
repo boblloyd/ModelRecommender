@@ -1,0 +1,11 @@
+# StorageClass for manually-provisioned hostPath volumes.
+# "no-provisioner" means volumes are created by hand (the PV in pv.yaml),
+# not dynamically. WaitForFirstConsumer defers binding until a pod is scheduled,
+# which ensures the PV and pod land on the same node.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

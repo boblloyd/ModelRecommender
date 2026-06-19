@@ -30,7 +30,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 CIVITAI_API_BASE = "https://civitai.com/api/v1"
-CRAWL_TYPES = "Checkpoint,LORA,LoCon"
+CRAWL_TYPES = ["Checkpoint", "LORA", "LoCon"]
 PAGE_SIZE = int(os.environ.get("CRAWL_PAGE_SIZE", "100"))
 BACKOFF_START = float(os.environ.get("RATE_LIMIT_BACKOFF_START", "2"))
 BACKOFF_MAX = float(os.environ.get("RATE_LIMIT_BACKOFF_MAX", "30"))
@@ -154,7 +154,12 @@ async def _upsert_batch(pool: asyncpg.Pool, records: list[dict]) -> int:
     return len(records)
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str, token: str | None) -> dict:
+async def _fetch_page(
+    client: httpx.AsyncClient,
+    url: str,
+    token: str | None,
+    params: dict | None = None,
+) -> dict:
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -162,7 +167,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str, token: str | None) ->
     backoff = BACKOFF_START
     while True:
         try:
-            resp = await client.get(url, headers=headers, timeout=30.0)
+            resp = await client.get(url, headers=headers, params=params, timeout=30.0)
         except httpx.RequestError as exc:
             log.warning("Request error: %s — retrying in %.0fs", exc, backoff)
             await asyncio.sleep(backoff)
@@ -194,18 +199,23 @@ async def full_crawl(base_model: str, pool: asyncpg.Pool) -> int:
             base_model,
         )
 
-    start_url = (
-        f"{CIVITAI_API_BASE}/models"
-        f"?limit={PAGE_SIZE}&types={CRAWL_TYPES}"
-        f"&baseModels={base_model}&sort=Most+Downloaded"
-    )
-    url: str | None = start_url
+    initial_params = {
+        "limit": PAGE_SIZE,
+        "types": CRAWL_TYPES,
+        "baseModels": base_model,
+        "sort": "Most Downloaded",
+    }
+    base_url = f"{CIVITAI_API_BASE}/models"
+    next_url: str | None = None
 
     async with httpx.AsyncClient() as client:
         page = 1
-        while url:
+        while True:
             log.info("Page %d — '%s' …", page, base_model)
-            data = await _fetch_page(client, url, token)
+            if next_url:
+                data = await _fetch_page(client, next_url, token)
+            else:
+                data = await _fetch_page(client, base_url, token, params=initial_params)
 
             records = [
                 r
@@ -216,8 +226,10 @@ async def full_crawl(base_model: str, pool: asyncpg.Pool) -> int:
             total += inserted
             log.info("  → %d records upserted (running total: %d)", inserted, total)
 
-            url = data.get("metadata", {}).get("nextPage")
+            next_url = data.get("metadata", {}).get("nextPage")
             page += 1
+            if not next_url:
+                break
 
     async with pool.acquire() as conn:
         await conn.execute(
@@ -265,19 +277,24 @@ async def incremental_update(base_model: str, pool: asyncpg.Pool) -> int:
     token = os.environ.get("CIVITAI_API_TOKEN")
     total = 0
 
-    start_url = (
-        f"{CIVITAI_API_BASE}/models"
-        f"?limit={PAGE_SIZE}&types={CRAWL_TYPES}"
-        f"&baseModels={base_model}&sort=Newest"
-    )
-    url: str | None = start_url
+    initial_params = {
+        "limit": PAGE_SIZE,
+        "types": CRAWL_TYPES,
+        "baseModels": base_model,
+        "sort": "Newest",
+    }
+    base_url = f"{CIVITAI_API_BASE}/models"
+    next_url: str | None = None
 
     async with httpx.AsyncClient() as client:
         page = 1
         stop = False
-        while url and not stop:
+        while not stop:
             log.info("Incremental page %d …", page)
-            data = await _fetch_page(client, url, token)
+            if next_url:
+                data = await _fetch_page(client, next_url, token)
+            else:
+                data = await _fetch_page(client, base_url, token, params=initial_params)
 
             records: list[dict] = []
             for item in data.get("items", []):
@@ -289,6 +306,10 @@ async def incremental_update(base_model: str, pool: asyncpg.Pool) -> int:
                     stop = True
                     break
                 records.append(r)
+
+            next_url = data.get("metadata", {}).get("nextPage")
+            if not next_url:
+                stop = True
 
             if records:
                 inserted = await _upsert_batch(pool, records)
