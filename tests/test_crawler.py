@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-import respx
 
 from crawler.civitai_crawler import (
     _extract_record,
@@ -158,9 +157,8 @@ def test_extract_record_checkpoint_type():
 # full_crawl
 # ---------------------------------------------------------------------------
 
-@respx.mock
-async def test_full_crawl_single_page_upserts_all_records(mock_pool, mock_conn):
-    respx.get(CIVITAI_MODELS_URL).mock(
+async def test_full_crawl_single_page_upserts_all_records(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_LORA, CIVITAI_CHECKPOINT]))
     )
 
@@ -170,12 +168,11 @@ async def test_full_crawl_single_page_upserts_all_records(mock_pool, mock_conn):
     mock_conn.executemany.assert_called_once()
 
 
-@respx.mock
-async def test_full_crawl_follows_next_page_url(mock_pool, mock_conn):
-    respx.get(CIVITAI_MODELS_URL).mock(
+async def test_full_crawl_follows_next_page_url(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_LORA], next_url=PAGE_2_URL))
     )
-    respx.get(PAGE_2_URL).mock(
+    respx_mock.get(PAGE_2_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_CHECKPOINT]))
     )
 
@@ -185,9 +182,8 @@ async def test_full_crawl_follows_next_page_url(mock_pool, mock_conn):
     assert mock_conn.executemany.call_count == 2
 
 
-@respx.mock
-async def test_full_crawl_skips_items_with_no_versions(mock_pool, mock_conn):
-    respx.get(CIVITAI_MODELS_URL).mock(
+async def test_full_crawl_skips_items_with_no_versions(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_NO_VERSIONS]))
     )
 
@@ -197,9 +193,8 @@ async def test_full_crawl_skips_items_with_no_versions(mock_pool, mock_conn):
     mock_conn.executemany.assert_not_called()
 
 
-@respx.mock
-async def test_full_crawl_marks_base_model_index_complete(mock_pool, mock_conn):
-    respx.get(CIVITAI_MODELS_URL).mock(
+async def test_full_crawl_marks_base_model_index_complete(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_LORA]))
     )
 
@@ -211,9 +206,8 @@ async def test_full_crawl_marks_base_model_index_complete(mock_pool, mock_conn):
     assert "TRUE" in final_sql
 
 
-@respx.mock
-async def test_full_crawl_retries_on_429_rate_limit(mock_pool, mock_conn):
-    respx.get(CIVITAI_MODELS_URL).mock(
+async def test_full_crawl_retries_on_429_rate_limit(respx_mock, mock_pool, mock_conn):
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         side_effect=[
             httpx.Response(429),
             httpx.Response(200, json=api_page([CIVITAI_LORA])),
@@ -231,8 +225,7 @@ async def test_full_crawl_retries_on_429_rate_limit(mock_pool, mock_conn):
 # incremental_update
 # ---------------------------------------------------------------------------
 
-@respx.mock
-async def test_incremental_update_falls_back_when_no_prior_crawl(mock_pool, mock_conn):
+async def test_incremental_update_falls_back_when_no_prior_crawl(respx_mock, mock_pool, mock_conn):
     mock_conn.fetchrow = AsyncMock(return_value=None)
 
     with patch("crawler.civitai_crawler.full_crawl", new=AsyncMock(return_value=42)) as mock_full:
@@ -242,8 +235,7 @@ async def test_incremental_update_falls_back_when_no_prior_crawl(mock_pool, mock
     assert count == 42
 
 
-@respx.mock
-async def test_incremental_update_stops_when_known_version_id_found(mock_pool, mock_conn):
+async def test_incremental_update_stops_when_known_version_id_found(respx_mock, mock_pool, mock_conn):
     mock_conn.fetchrow = AsyncMock(
         return_value={"last_crawled": datetime.now(timezone.utc)}
     )
@@ -251,7 +243,7 @@ async def test_incremental_update_stops_when_known_version_id_found(mock_pool, m
     mock_conn.fetch = AsyncMock(
         return_value=[{"civitai_version_id": 67890}]
     )
-    respx.get(CIVITAI_MODELS_URL).mock(
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_LORA]))
     )
 
@@ -261,14 +253,13 @@ async def test_incremental_update_stops_when_known_version_id_found(mock_pool, m
     mock_conn.executemany.assert_not_called()
 
 
-@respx.mock
-async def test_incremental_update_upserts_genuinely_new_models(mock_pool, mock_conn):
+async def test_incremental_update_upserts_genuinely_new_models(respx_mock, mock_pool, mock_conn):
     mock_conn.fetchrow = AsyncMock(
         return_value={"last_crawled": datetime.now(timezone.utc)}
     )
     # No existing IDs in cache
     mock_conn.fetch = AsyncMock(return_value=[])
-    respx.get(CIVITAI_MODELS_URL).mock(
+    respx_mock.get(CIVITAI_MODELS_URL).mock(
         return_value=httpx.Response(200, json=api_page([CIVITAI_LORA]))
     )
 

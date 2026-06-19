@@ -2,8 +2,8 @@
 Tests for api/main.py FastAPI endpoints.
 
 The asyncpg pool and all agent functions are mocked so no database
-or network access occurs. The lifespan startup/shutdown is patched
-to inject the mock pool directly into app.state.
+or network access occurs. ASGITransport does not trigger lifespan,
+so app.state.pool and the _get_pool dependency override are set directly.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -21,18 +21,17 @@ async def client(mock_pool):
     """
     Test client with the real FastAPI app but a mocked pool.
 
-    Patches get_pool / init_schema / close_pool so the lifespan
-    sets app.state.pool = mock_pool without touching a real database.
+    ASGITransport does not trigger FastAPI lifespan, so app.state.pool is
+    never set by the startup hook. We set it directly and override the
+    _get_pool dependency so every endpoint receives mock_pool.
     """
-    with (
-        patch("api.main.get_pool", new=AsyncMock(return_value=mock_pool)),
-        patch("api.main.init_schema", new=AsyncMock()),
-        patch("api.main.close_pool", new=AsyncMock()),
-    ):
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as ac:
-            yield ac
+    app.state.pool = mock_pool
+    app.dependency_overrides[_get_pool] = lambda: mock_pool
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as ac:
+        yield ac
+    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
