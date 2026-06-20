@@ -26,6 +26,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents.catalog_query import ensure_base_model_cached, query_catalog
+from agents.compatibility_analyst import analyze_compatibility
+from agents.intent_parser import parse_intent
 from db.database import close_pool, get_pool, init_schema
 
 
@@ -65,21 +67,6 @@ async def _get_pool(request: Request) -> asyncpg.Pool:
     return request.app.state.pool
 
 
-# English function words that carry no semantic signal for model search.
-# Phase 2 replaces this list with LLM-based intent parsing.
-_STOP_WORDS = frozenset({
-    "a", "an", "the",
-    "and", "or", "but", "not", "nor",
-    "in", "on", "at", "to", "for", "of", "with", "by", "from",
-    "is", "are", "was", "were", "be", "been", "being",
-    "it", "its", "this", "that", "these", "those",
-    "as", "so", "if", "do", "did", "has", "have", "had",
-    "i", "me", "my", "we", "our", "you", "your",
-    "he", "she", "they", "them", "his", "her", "their",
-    "into", "onto", "upon", "up", "out", "no", "go",
-})
-
-
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -89,6 +76,7 @@ class RecommendRequest(BaseModel):
     base_model: str = "Flux.1 D"
     max_loras: int = 5
     nsfw_filter: bool = False
+    llm_reasoning: bool = True
 
 
 class CrawlRequest(BaseModel):
@@ -160,8 +148,13 @@ async def recommend(
     """
     Return ranked model and LoRA recommendations for a natural language prompt.
 
-    Phase 1: raw tag-scored results from the catalog.
-    Phase 2 (future): LLM compatibility reasoning via local Ollama.
+    Phase 2: LLM intent parsing (Ollama) extracts structured tags from the prompt,
+    and an optional compatibility analyst annotates top results with per-model notes
+    and a recommended combination.  Both stages degrade gracefully to Phase 1
+    stop-word filtering if Ollama is unavailable.
+
+    Set llm_reasoning=false to skip the compatibility analyst and return raw
+    scored results immediately (faster, no second LLM call).
     """
     cached = await ensure_base_model_cached(req.base_model, pool)
     if not cached:
@@ -173,15 +166,10 @@ async def recommend(
             ),
         )
 
-    # Phase 1: split the prompt into search tags directly (LLM intent parser is Phase 2)
-    search_tags = [
-        word
-        for w in req.prompt.lower().split()
-        if (word := w.strip(".,!?;:\"'")) and word not in _STOP_WORDS
-    ]
+    intent = await parse_intent(req.prompt)
 
     results = await query_catalog(
-        search_tags=search_tags,
+        search_tags=intent.tags,
         pool=pool,
         base_model=req.base_model,
         nsfw_max=1 if req.nsfw_filter else None,
@@ -189,11 +177,28 @@ async def recommend(
         limit_loras=req.max_loras,
     )
 
+    phase = "2a — LLM intent parsed" if intent.llm_used else "1 — stop-word fallback"
+
+    if req.llm_reasoning and intent.llm_used:
+        results = await analyze_compatibility(
+            prompt=req.prompt,
+            style=intent.style,
+            subject=intent.subject,
+            results=results,
+        )
+        if results.get("recommended_combination"):
+            phase = "2b — LLM intent + compatibility analysis"
+
     return {
         "prompt": req.prompt,
         "base_model": req.base_model,
-        "search_tags_used": search_tags,
-        "phase": "1 — raw scored results (LLM reasoning added in Phase 2)",
+        "intent": {
+            "tags": intent.tags,
+            "style": intent.style,
+            "subject": intent.subject,
+            "llm_used": intent.llm_used,
+        },
+        "phase": phase,
         **results,
     }
 
