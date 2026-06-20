@@ -36,6 +36,11 @@ spec:
                 secretKeyRef:
                   name: model-recommender-secrets
                   key: hf-token
+            - name: OLLAMA_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: ollama-host
           envFrom:
             - configMapRef:
                 name: model-recommender-config
