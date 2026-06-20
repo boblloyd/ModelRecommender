@@ -1,0 +1,49 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest          # cloud runner — free, isolated
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest \
+            --cov \
+            --cov-report=term-missing \
+            --junitxml=junit.xml \
+            -v
+
+  deploy:
+    name: Build & Deploy
+    needs: test                     # only runs if tests pass
+    runs-on: self-hosted            # your Ubuntu node
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t model-recommender:latest .
+
+      - name: Import image into k3s
+        run: docker save model-recommender:latest | sudo k3s ctr images import -
+
+      - name: Restart API deployment
+        run: |
+          kubectl rollout restart deployment/model-recommender-api -n model-recommender
+          kubectl rollout status  deployment/model-recommender-api -n model-recommender
