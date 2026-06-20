@@ -45,5 +45,6 @@ jobs:
 
       - name: Restart API deployment
         run: |
+          export KUBECONFIG="$HOME/.kube/config"
           kubectl rollout restart deployment/model-recommender-api -n model-recommender
           kubectl rollout status  deployment/model-recommender-api -n model-recommender
