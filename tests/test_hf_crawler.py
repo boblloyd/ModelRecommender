@@ -104,7 +104,35 @@ def test_base_model_matches_returns_true_for_unknown_base_model():
 
 
 def test_base_model_matches_missing_card_data_returns_false():
-    item = {**HF_LORA, "cardData": None}
+    item = {**HF_LORA, "cardData": None, "tags": ["lora", "text-to-image"]}
+    assert _base_model_matches(item, "Flux.1 D") is False
+
+
+def test_base_model_matches_via_base_model_tag_when_card_data_absent():
+    """HF auto-adds base_model:<repo> tags; match should work even with no cardData."""
+    item = {
+        **HF_LORA,
+        "tags": ["lora", "base_model:black-forest-labs/FLUX.1-dev"],
+        "cardData": None,
+    }
+    assert _base_model_matches(item, "Flux.1 D") is True
+
+
+def test_base_model_matches_via_flux_dev_alias_tag():
+    item = {
+        **HF_LORA,
+        "tags": ["lora", "base_model:black-forest-labs/flux-dev"],
+        "cardData": None,
+    }
+    assert _base_model_matches(item, "Flux.1 D") is True
+
+
+def test_base_model_does_not_match_unrelated_base_model_tag():
+    item = {
+        **HF_LORA,
+        "tags": ["lora", "base_model:stabilityai/stable-diffusion-xl-base-1.0"],
+        "cardData": None,
+    }
     assert _base_model_matches(item, "Flux.1 D") is False
 
 

@@ -14,8 +14,18 @@ import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
+from agents.intent_parser import IntentResult
 from api.main import _dispatch_job, _get_pool, app
 from tests.conftest import make_db_model
+
+
+def _intent(tags=None, style="cinematic", subject="sword fight", llm_used=False) -> IntentResult:
+    return IntentResult(
+        tags=tags or ["sword", "fight", "rain"],
+        style=style,
+        subject=subject,
+        llm_used=llm_used,
+    )
 
 
 @pytest_asyncio.fixture
@@ -99,6 +109,7 @@ async def test_recommend_returns_results_when_cached(client):
 
     with (
         patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent())),
         patch("api.main.query_catalog", new=AsyncMock(
             return_value={"checkpoints": [checkpoint], "loras": [lora]}
         )),
@@ -116,15 +127,19 @@ async def test_recommend_returns_results_when_cached(client):
     assert len(data["loras"]) == 1
 
 
-async def test_recommend_passes_prompt_words_as_search_tags(client):
+async def test_recommend_passes_intent_tags_to_catalog(client):
+    """Tags from parse_intent are forwarded to query_catalog unchanged."""
     captured = {}
 
     async def capture_catalog(search_tags, pool, **kwargs):
         captured["tags"] = search_tags
         return {"checkpoints": [], "loras": []}
 
+    intent = _intent(tags=["sword", "fight", "rain"])
+
     with (
         patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=intent)),
         patch("api.main.query_catalog", side_effect=capture_catalog),
     ):
         await client.post(
@@ -132,35 +147,27 @@ async def test_recommend_passes_prompt_words_as_search_tags(client):
             json={"prompt": "sword fight in the rain", "base_model": "Flux.1 D"},
         )
 
-    assert "sword" in captured["tags"]
-    assert "fight" in captured["tags"]
-    assert "rain" in captured["tags"]
-    assert "in" not in captured["tags"]
-    assert "the" not in captured["tags"]
+    assert captured["tags"] == ["sword", "fight", "rain"]
 
 
-async def test_recommend_stop_words_filtered_regardless_of_length(client):
-    """Stop words like 'with', 'from', 'they' are 4+ chars but must still be dropped."""
-    captured = {}
+async def test_recommend_calls_parse_intent_with_user_prompt(client):
+    captured_prompt = {}
 
-    async def capture_catalog(search_tags, pool, **kwargs):
-        captured["tags"] = search_tags
-        return {"checkpoints": [], "loras": []}
+    async def capture_intent(prompt):
+        captured_prompt["value"] = prompt
+        return _intent()
 
     with (
         patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
-        patch("api.main.query_catalog", side_effect=capture_catalog),
+        patch("api.main.parse_intent", side_effect=capture_intent),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
     ):
         await client.post(
             "/recommend",
-            json={"prompt": "dark fantasy character with sword", "base_model": "Flux.1 D"},
+            json={"prompt": "epic fantasy portrait", "base_model": "Flux.1 D"},
         )
 
-    assert "dark" in captured["tags"]
-    assert "fantasy" in captured["tags"]
-    assert "character" in captured["tags"]
-    assert "sword" in captured["tags"]
-    assert "with" not in captured["tags"]
+    assert captured_prompt["value"] == "epic fantasy portrait"
 
 
 async def test_recommend_nsfw_filter_propagated(client):
@@ -172,6 +179,7 @@ async def test_recommend_nsfw_filter_propagated(client):
 
     with (
         patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent())),
         patch("api.main.query_catalog", side_effect=capture_catalog),
     ):
         await client.post(
@@ -182,12 +190,140 @@ async def test_recommend_nsfw_filter_propagated(client):
     assert captured["nsfw_max"] == 1
 
 
-async def test_recommend_response_includes_phase_note(client):
+async def test_recommend_response_includes_intent_block(client):
+    intent = _intent(tags=["portrait", "anime"], style="anime", subject="warrior", llm_used=True)
+
     with (
         patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
-        patch("api.main.query_catalog", new=AsyncMock(
+        patch("api.main.parse_intent", new=AsyncMock(return_value=intent)),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", new=AsyncMock(
             return_value={"checkpoints": [], "loras": []}
         )),
+    ):
+        response = await client.post(
+            "/recommend",
+            json={"prompt": "anime warrior", "base_model": "Flux.1 D"},
+        )
+
+    data = response.json()
+    assert "intent" in data
+    assert data["intent"]["tags"] == ["portrait", "anime"]
+    assert data["intent"]["style"] == "anime"
+    assert data["intent"]["subject"] == "warrior"
+    assert data["intent"]["llm_used"] is True
+
+
+async def test_recommend_phase_is_1_when_llm_falls_back(client):
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=False))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+    ):
+        response = await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D"},
+        )
+
+    assert "1" in response.json()["phase"]
+
+
+async def test_recommend_phase_is_2a_when_llm_intent_parsed(client):
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=True))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", new=AsyncMock(
+            return_value={"checkpoints": [], "loras": []}  # no recommended_combination
+        )),
+    ):
+        response = await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D"},
+        )
+
+    assert "2a" in response.json()["phase"]
+
+
+async def test_recommend_phase_is_2b_when_full_llm_pipeline_runs(client):
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=True))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", new=AsyncMock(return_value={
+            "checkpoints": [],
+            "loras": [],
+            "recommended_combination": "Checkpoint A + LoRA B",
+            "combination_notes": "Works well together.",
+        })),
+    ):
+        response = await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D"},
+        )
+
+    data = response.json()
+    assert "2b" in data["phase"]
+    assert data["recommended_combination"] == "Checkpoint A + LoRA B"
+
+
+async def test_recommend_calls_analyze_compatibility_when_llm_used(client):
+    mock_analyze = AsyncMock(return_value={"checkpoints": [], "loras": []})
+
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=True))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", mock_analyze),
+    ):
+        await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D", "llm_reasoning": True},
+        )
+
+    mock_analyze.assert_called_once()
+
+
+async def test_recommend_skips_analyze_compatibility_when_llm_reasoning_false(client):
+    mock_analyze = AsyncMock(return_value={"checkpoints": [], "loras": []})
+
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=True))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", mock_analyze),
+    ):
+        await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D", "llm_reasoning": False},
+        )
+
+    mock_analyze.assert_not_called()
+
+
+async def test_recommend_skips_analyze_compatibility_when_llm_not_used(client):
+    """analyze_compatibility should not run if parse_intent fell back to stop-words."""
+    mock_analyze = AsyncMock(return_value={"checkpoints": [], "loras": []})
+
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent(llm_used=False))),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
+        patch("api.main.analyze_compatibility", mock_analyze),
+    ):
+        await client.post(
+            "/recommend",
+            json={"prompt": "test", "base_model": "Flux.1 D"},
+        )
+
+    mock_analyze.assert_not_called()
+
+
+async def test_recommend_response_includes_phase_field(client):
+    with (
+        patch("api.main.ensure_base_model_cached", new=AsyncMock(return_value=True)),
+        patch("api.main.parse_intent", new=AsyncMock(return_value=_intent())),
+        patch("api.main.query_catalog", new=AsyncMock(return_value={"checkpoints": [], "loras": []})),
     ):
         response = await client.post(
             "/recommend",
