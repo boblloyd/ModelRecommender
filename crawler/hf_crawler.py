@@ -38,9 +38,9 @@ BACKOFF_MAX = float(os.environ.get("RATE_LIMIT_BACKOFF_MAX", "30"))
 
 # HuggingFace tag used in API filter requests for each base model
 BASE_MODEL_HF_TAGS = {
-    "Flux.1 D": "flux-dev",
-    "SDXL 1.0": "sdxl",
-    "SD 1.5": "stable-diffusion-v1-5",
+    "Flux.1 D": "base_model:black-forest-labs/FLUX.1-dev",
+    "SDXL 1.0": "base_model:stabilityai/stable-diffusion-xl-base-1.0",
+    "SD 1.5": "base_model:runwayml/stable-diffusion-v1-5",
 }
 
 # cardData.base_model values that indicate compatibility with each base model
