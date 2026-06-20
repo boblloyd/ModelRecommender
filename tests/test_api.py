@@ -247,7 +247,7 @@ async def test_cache_crawl_logs_cache_request(client, mock_conn):
 async def test_cache_update_forces_incremental_mode(client, mock_conn):
     captured = {}
 
-    def capture_dispatch(base_model, mode):
+    def capture_dispatch(base_model, mode, source="civitai"):
         captured["mode"] = mode
         return {"status": "job_created", "job_name": "x", "base_model": base_model, "mode": mode}
 

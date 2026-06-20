@@ -80,6 +80,99 @@ CIVITAI_NSFW_LORA = {
     "modelVersions": [{**CIVITAI_LORA["modelVersions"][0], "id": 88888}],
 }
 
+# ---------------------------------------------------------------------------
+# Canonical HuggingFace API response shapes
+# ---------------------------------------------------------------------------
+
+HF_LORA = {
+    "id": "XLabs-AI/flux-RealismLora",
+    "modelId": "XLabs-AI/flux-RealismLora",
+    "author": "XLabs-AI",
+    "sha": "abc123def456",
+    "lastModified": "2024-10-15T10:00:00.000Z",
+    "private": False,
+    "disabled": False,
+    "gated": False,
+    "pipeline_tag": "text-to-image",
+    "tags": ["lora", "flux-dev", "flux", "text-to-image", "diffusers"],
+    "downloads": 85000,
+    "likes": 2300,
+    "library_name": "diffusers",
+    "createdAt": "2024-10-01T00:00:00.000Z",
+    "cardData": {
+        "base_model": "black-forest-labs/FLUX.1-dev",
+        "tags": ["lora", "flux", "realism"],
+        "license": "apache-2.0",
+    },
+    "siblings": [
+        {"rfilename": "README.md"},
+        {"rfilename": "lora.safetensors"},
+    ],
+}
+
+HF_CHECKPOINT = {
+    "id": "Freepik/flux.1-lite-8B-alpha",
+    "modelId": "Freepik/flux.1-lite-8B-alpha",
+    "author": "Freepik",
+    "sha": "def456abc789",
+    "lastModified": "2024-09-01T00:00:00.000Z",
+    "private": False,
+    "disabled": False,
+    "gated": False,
+    "pipeline_tag": "text-to-image",
+    "tags": ["diffusers", "flux-dev", "text-to-image"],
+    "downloads": 42000,
+    "likes": 910,
+    "library_name": "diffusers",
+    "createdAt": "2024-09-01T00:00:00.000Z",
+    "cardData": {
+        "base_model": "black-forest-labs/FLUX.1-dev",
+        "license": "apache-2.0",
+    },
+    "siblings": [{"rfilename": "README.md"}],
+}
+
+HF_WRONG_BASE_MODEL = {
+    "id": "some-user/sdxl-lora",
+    "modelId": "some-user/sdxl-lora",
+    "author": "some-user",
+    "sha": "fff000",
+    "lastModified": "2024-07-01T00:00:00.000Z",
+    "private": False,
+    "disabled": False,
+    "gated": False,
+    "pipeline_tag": "text-to-image",
+    "tags": ["lora", "sdxl", "text-to-image", "diffusers"],
+    "downloads": 5000,
+    "likes": 120,
+    "library_name": "diffusers",
+    "createdAt": "2024-07-01T00:00:00.000Z",
+    "cardData": {
+        "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
+        "license": "mit",
+    },
+    "siblings": [{"rfilename": "README.md"}],
+}
+
+HF_NO_TYPE = {
+    "id": "some-user/embeddings-model",
+    "modelId": "some-user/embeddings-model",
+    "author": "some-user",
+    "sha": "aaa111",
+    "lastModified": "2024-06-01T00:00:00.000Z",
+    "private": False,
+    "disabled": False,
+    "gated": False,
+    "pipeline_tag": "feature-extraction",
+    "tags": ["flux-dev", "text-encoders"],  # no lora, no diffusers
+    "downloads": 1000,
+    "likes": 20,
+    "library_name": "transformers",
+    "createdAt": "2024-06-01T00:00:00.000Z",
+    "cardData": {"base_model": "black-forest-labs/FLUX.1-dev"},
+    "siblings": [{"rfilename": "README.md"}],
+}
+
 CIVITAI_NO_VERSIONS = {
     "id": 55555,
     "name": "Broken Model",

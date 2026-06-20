@@ -1,0 +1,58 @@
+# One-off full crawl Job for HuggingFace models.
+# Edit BASE_MODEL before applying, then:
+#   kubectl apply -f k8s/crawler/hf-job.yaml
+#
+# The crawler pod starts, runs to completion, and shuts down automatically.
+# Logs:  kubectl logs -n model-recommender -l job-name=hf-crawl-flux1d -f
+# Status: kubectl get jobs -n model-recommender
+#
+# HF_API_TOKEN is optional — the HuggingFace API works without one for public
+# models, but providing a token raises rate limits.  Add key hf-api-token to
+# the model-recommender-secrets Secret to enable it.
+#
+# The Job and its pod are auto-deleted 1 hour after completion (ttlSecondsAfterFinished).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hf-crawl-flux1d
+  namespace: model-recommender
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: crawler
+          image: model-recommender:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - crawler.hf_crawler
+            - --base-model
+            - "Flux.1 D"
+            - --mode
+            - full
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: database-url
+            - name: HF_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: model-recommender-secrets
+                  key: hf-api-token
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: model-recommender-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

@@ -94,6 +94,7 @@ class RecommendRequest(BaseModel):
 class CrawlRequest(BaseModel):
     base_model: str
     mode: str = "full"
+    source: str = "civitai"  # "civitai" | "huggingface"
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +139,7 @@ async def crawl(
             "INSERT INTO cache_requests (base_model_name, triggered_by) VALUES ($1, $2)",
             req.base_model, "api",
         )
-    return _dispatch_job(req.base_model, req.mode)
+    return _dispatch_job(req.base_model, req.mode, req.source)
 
 
 @app.post("/cache/update", tags=["cache"])
@@ -201,7 +202,7 @@ async def recommend(
 # Kubernetes Job dispatch
 # ---------------------------------------------------------------------------
 
-def _dispatch_job(base_model: str, mode: str) -> dict:
+def _dispatch_job(base_model: str, mode: str, source: str = "civitai") -> dict:
     """
     Create a Kubernetes Job that runs the crawler in an ephemeral pod.
     The pod exits when the crawl finishes.  Falls back gracefully when
@@ -255,7 +256,8 @@ def _dispatch_job(base_model: str, mode: str) -> dict:
                                 image=image,
                                 image_pull_policy="IfNotPresent",
                                 command=[
-                                    "python", "-m", "crawler.civitai_crawler",
+                                    "python", "-m",
+                                    "crawler.hf_crawler" if source == "huggingface" else "crawler.civitai_crawler",
                                     "--base-model", base_model,
                                     "--mode", mode,
                                 ],
@@ -279,6 +281,7 @@ def _dispatch_job(base_model: str, mode: str) -> dict:
             "job_name": job_name,
             "base_model": base_model,
             "mode": mode,
+            "source": source,
             "message": f"Crawler pod will start shortly. Track with: kubectl logs -n {namespace} -l job-name={job_name} -f",
         }
 

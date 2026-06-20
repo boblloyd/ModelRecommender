@@ -35,6 +35,10 @@ CREATE INDEX IF NOT EXISTS idx_source       ON models(source);
 CREATE INDEX IF NOT EXISTS idx_nsfw_level   ON models(nsfw_level);
 CREATE INDEX IF NOT EXISTS idx_tags_gin     ON models USING GIN(tags);
 
+-- Unique index for HuggingFace models; NULLs (Civitai rows) are excluded automatically
+-- because PostgreSQL treats each NULL as distinct in a non-partial unique index.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hf_repo_id ON models(hf_repo_id);
+
 CREATE TABLE IF NOT EXISTS base_model_index (
     id               BIGSERIAL PRIMARY KEY,
     base_model_name  TEXT UNIQUE NOT NULL,
