@@ -266,14 +266,31 @@ async def full_crawl(base_model: str, pool: asyncpg.Pool) -> int:
             else:
                 items, link_header = await _fetch_page(client, base_url, token, params=params)
 
-            records = [
-                r
-                for item in items
-                if (r := _extract_record(item, base_model)) is not None
-            ]
+            if page == 1 and items:
+                s = items[0]
+                log.info("Sample[0] tags=%s cardData=%s", s.get("tags", [])[:10], s.get("cardData"))
+
+            no_type = no_base = 0
+            records = []
+            for item in items:
+                rid = item.get("id") or item.get("modelId")
+                tags = [t for t in (item.get("tags") or []) if not t.startswith("arxiv:")]
+                if _infer_type(tags) is None:
+                    no_type += 1
+                    continue
+                if not _base_model_matches(item, base_model):
+                    no_base += 1
+                    continue
+                r = _extract_record(item, base_model)
+                if r:
+                    records.append(r)
+
             inserted = await _upsert_batch(pool, records)
             total += inserted
-            log.info("  → %d records upserted (running total: %d)", inserted, total)
+            log.info(
+                "  → %d fetched | %d no-type | %d no-base | %d upserted (total: %d)",
+                len(items), no_type, no_base, inserted, total,
+            )
 
             next_url = _parse_next_url(link_header)
             page += 1
