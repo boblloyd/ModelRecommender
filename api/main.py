@@ -15,13 +15,14 @@ and shuts down — leaving the API pod untouched.
 Swagger UI is available at /docs.
 """
 
+import json
 import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
 
 import asyncpg
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -200,6 +201,41 @@ async def recommend(
         },
         "phase": phase,
         **results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# TensorArt import
+# ---------------------------------------------------------------------------
+
+@app.post("/catalog/import/tensorart", tags=["catalog"])
+async def import_tensorart(
+    file: UploadFile = File(...),
+    pool: asyncpg.Pool = Depends(_get_pool),
+) -> dict:
+    """
+    Import model metadata from a TensorArt TamperMonkey export JSON file.
+
+    Upload the file produced by the tensor_art_capture.user.js "Export JSON"
+    button.  Each entry in the file becomes a catalog record scored and ranked
+    alongside CivitAI and HuggingFace models in /recommend results.
+    """
+    from crawler.tensorart_crawler import ingest_from_export_data
+
+    content = await file.read()
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
+
+    if not isinstance(data, list):
+        raise HTTPException(status_code=400, detail="Export file must contain a JSON array.")
+
+    count = await ingest_from_export_data(data, pool)
+    return {
+        "status": "ok",
+        "models_imported": count,
+        "filename": file.filename,
     }
 
 

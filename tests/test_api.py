@@ -6,6 +6,7 @@ or network access occurs. ASGITransport does not trigger lifespan,
 so app.state.pool and the _get_pool dependency override are set directly.
 """
 
+import json
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from agents.intent_parser import IntentResult
 from api.main import _dispatch_job, _get_pool, app
-from tests.conftest import make_db_model
+from tests.conftest import make_db_model, TA_EXPORT_LORA
 
 
 def _intent(tags=None, style="cinematic", subject="sword fight", llm_used=False) -> IntentResult:
@@ -456,3 +457,65 @@ def test_dispatch_job_raises_500_when_k8s_api_call_fails():
 
     assert exc_info.value.status_code == 500
     assert "Failed to create crawl Job" in exc_info.value.detail
+
+
+# ---------------------------------------------------------------------------
+# POST /catalog/import/tensorart
+# ---------------------------------------------------------------------------
+
+async def test_import_tensorart_returns_count(client):
+    payload = json.dumps([TA_EXPORT_LORA]).encode()
+
+    with patch(
+        "crawler.tensorart_crawler.ingest_from_export_data",
+        new=AsyncMock(return_value=1),
+    ):
+        response = await client.post(
+            "/catalog/import/tensorart",
+            files={"file": ("export.json", payload, "application/json")},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["models_imported"] == 1
+    assert data["filename"] == "export.json"
+
+
+async def test_import_tensorart_returns_400_for_invalid_json(client):
+    response = await client.post(
+        "/catalog/import/tensorart",
+        files={"file": ("bad.json", b"not json at all", "application/json")},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid JSON" in response.json()["detail"]
+
+
+async def test_import_tensorart_returns_400_when_data_is_not_array(client):
+    payload = json.dumps({"id": "123"}).encode()
+
+    response = await client.post(
+        "/catalog/import/tensorart",
+        files={"file": ("bad.json", payload, "application/json")},
+    )
+
+    assert response.status_code == 400
+    assert "JSON array" in response.json()["detail"]
+
+
+async def test_import_tensorart_zero_when_all_entries_invalid(client):
+    bad_data = [{"id": ""}, {"nuxt": None}]
+    payload = json.dumps(bad_data).encode()
+
+    with patch(
+        "crawler.tensorart_crawler.ingest_from_export_data",
+        new=AsyncMock(return_value=0),
+    ):
+        response = await client.post(
+            "/catalog/import/tensorart",
+            files={"file": ("empty.json", payload, "application/json")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["models_imported"] == 0

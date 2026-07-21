@@ -17,53 +17,83 @@ import ollama
 log = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
-You are an expert in AI image generation models (Stable Diffusion, Flux) assessing \
-candidate checkpoints and LoRAs for a user's creative prompt.
+You are an expert AI image generation pipeline architect who selects the best \
+checkpoint and LoRA combination for a user's creative prompt.
 
 You will receive a JSON object with:
-  intent     — the user's prompt, detected style, and subject
-  checkpoints — candidate base model checkpoints
-  loras       — candidate LoRA adapters
+  intent      — the user's original prompt text, plus detected style and subject
+  checkpoints — candidate base model checkpoints with names, tags, and descriptions
+  loras       — candidate LoRA adapters with names, tags, trigger words, and descriptions
 
-Evaluate each candidate and return ONLY valid JSON with exactly this structure:
+How to evaluate:
+1. Read model DESCRIPTIONS carefully. Descriptions reveal what a model was actually
+   trained on and what it excels at. A LoRA described as "trained on rainy cityscapes
+   with neon reflections" is high-impact for a cyberpunk rain scene; its tags alone
+   would not tell you this.
+2. For each checkpoint, assess whether its description indicates strong handling of
+   the requested style, subject, or aesthetic.
+3. For each LoRA, judge impact by how directly its description matches the prompt:
+   - high: description directly addresses the prompt's core subject, style, or environment
+   - medium: description is relevant but not the main focus of the prompt
+   - low: description is tangentially related, generic, or the LoRA has no description
+4. Build prompt_additions: list trigger words for each recommended LoRA first (required
+   for activation), then add descriptive keywords the model descriptions suggest would
+   improve results for this specific prompt.
+
+Return ONLY valid JSON with exactly this structure:
 {
   "checkpoints": [
     {
       "id": <int>,
-      "compatibility_note": "<one sentence>",
+      "compatibility_note": "<one sentence: why this fits or doesn't, based on description>",
       "recommended": <true|false>
     }
   ],
   "loras": [
     {
       "id": <int>,
-      "compatibility_note": "<one sentence>",
+      "compatibility_note": "<one sentence: what this LoRA contributes based on its description>",
       "recommended": <true|false>,
-      "recommended_weight": <float 0.0–1.0 or null>
+      "recommended_weight": <float 0.4–0.9 or null>,
+      "impact": "<high|medium|low>"
     }
   ],
-  "recommended_combination": "<checkpoint name> + <lora name(s)>",
-  "combination_notes": "<1–2 sentences: why this combination works and any trigger word or weight tips>"
+  "recommended_combination": "<checkpoint name> + <top LoRA name(s)>",
+  "combination_notes": "<1–2 sentences: why this combination works and any weight tips>",
+  "prompt_additions": ["<trigger_word_or_keyword>", ...]
 }
 
-Guidelines:
-- compatibility_note: one concise sentence on fit or mismatch with the user's intent
-- recommended_weight: suggest lower (0.4–0.6) for subtle detail/texture LoRAs, higher (0.7–0.9) for strong style LoRAs; null if uncertain
-- Set recommended=false for candidates that clearly don't match the intent
-- combination_notes must mention trigger words if any LoRA requires them\
+Rules:
+- Base compatibility_note on the description content, not just the model name or tags
+- A LoRA with no description defaults to impact=low unless trigger words strongly match
+- recommended_weight: 0.4–0.6 for subtle texture/detail LoRAs; 0.7–0.9 for strong
+  style or character LoRAs; null if the description gives no guidance
+- prompt_additions: trigger words first (recommended LoRAs in priority order),
+  then style keywords their descriptions suggest for this specific prompt\
 """
 
 
 def _compact(model: dict) -> dict:
     """Reduce a full model record to the fields the LLM needs, saving tokens."""
-    return {
+    result = {
         "id": model["id"],
         "name": model["name"],
         "type": model["type"],
         "tags": (model.get("tags") or [])[:15],
         "trigger_words": (model.get("trigger_words") or [])[:10],
-        "description": (model.get("description") or "")[:400],
+        "description": (model.get("description") or "")[:600],
     }
+    if model.get("type") == "Checkpoint":
+        settings: dict = {}
+        if model.get("recommended_cfg"):
+            settings["cfg"] = model["recommended_cfg"]
+        if model.get("recommended_steps"):
+            settings["steps"] = model["recommended_steps"]
+        if model.get("recommended_sampler"):
+            settings["sampler"] = model["recommended_sampler"]
+        if settings:
+            result["settings"] = settings
+    return result
 
 
 def _merge(candidates: list[dict], notes: list[dict]) -> list[dict]:
@@ -74,6 +104,8 @@ def _merge(candidates: list[dict], notes: list[dict]) -> list[dict]:
         m["recommended"] = note.get("recommended", True)
         if "recommended_weight" in note:
             m["recommended_weight"] = note["recommended_weight"]
+        if "impact" in note:
+            m["impact"] = note["impact"]
     return candidates
 
 
@@ -88,7 +120,7 @@ async def _try_analysis(
             system=_SYSTEM_PROMPT,
             prompt=json.dumps(payload),
             format="json",
-            options={"temperature": 0.2, "num_predict": 1024},
+            options={"temperature": 0.2, "num_predict": 2048},
         )
         data = json.loads(resp.response)
         if "checkpoints" not in data and "loras" not in data:
@@ -151,4 +183,5 @@ async def analyze_compatibility(
         "loras": _merge(loras, data.get("loras") or []),
         "recommended_combination": data.get("recommended_combination"),
         "combination_notes": data.get("combination_notes"),
+        "prompt_additions": data.get("prompt_additions") or [],
     }

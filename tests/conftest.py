@@ -173,6 +173,49 @@ HF_NO_TYPE = {
     "siblings": [{"rfilename": "README.md"}],
 }
 
+# ---------------------------------------------------------------------------
+# Canonical TensorArt export shapes
+# ---------------------------------------------------------------------------
+
+# Minimal Nuxt devalue array with direct values (no indirection) — sufficient
+# for _extract_nuxt() since _resolve() returns non-integers unchanged.
+TA_NUXT_LORA = [
+    # Version object: has triggerWords + baseModel
+    {
+        "triggerWords": ["ta_combat", "action"],
+        "baseModel": "FLUX.1-dev",
+        "nsfwLevel": 0,
+    },
+    # Project object with relatedTags, stats, name, description
+    {
+        "name": "TensorArt Combat LoRA",
+        "description": "A combat LoRA from TensorArt",
+        "relatedTags": [
+            {"name": "combat", "type": "USER_GENERATED"},
+            {"name": "action", "type": "USER_GENERATED"},
+        ],
+        "statisticInfo": {"downloadCount": 5000, "likeCount": 150},
+    },
+    # Cover image
+    {
+        "coverShowcases": ["https://tensorartassets.com/model_showcase/preview.jpg"],
+    },
+]
+
+TA_NUXT_NO_NAME = [
+    # Version object only — no project object, so name stays empty
+    {
+        "triggerWords": [],
+        "baseModel": "FLUX.1-dev",
+    },
+]
+
+TA_EXPORT_LORA: dict = {"id": "111222333", "nuxt": TA_NUXT_LORA}
+TA_EXPORT_NO_NAME: dict = {"id": "999888777", "nuxt": TA_NUXT_NO_NAME}
+TA_EXPORT_MISSING_NUXT: dict = {"id": "555444333"}
+TA_EXPORT_MISSING_ID: dict = {"nuxt": TA_NUXT_LORA}
+
+
 CIVITAI_NO_VERSIONS = {
     "id": 55555,
     "name": "Broken Model",
@@ -240,6 +283,7 @@ def make_db_model(**overrides) -> dict:
         "civitai_model_id": 12345,
         "civitai_version_id": 67890,
         "hf_repo_id": None,
+        "tensorart_model_id": None,
         "name": "Combat Action LoRA",
         "version_name": "v1.0",
         "type": "LORA",

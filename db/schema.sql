@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS models (
     stats_thumbs_up     BIGINT DEFAULT 0,
     stats_thumbs_down   BIGINT DEFAULT 0,
     preview_image_url   TEXT,
+    tensorart_model_id  TEXT,
     date_cached         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     date_updated        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -38,6 +39,9 @@ CREATE INDEX IF NOT EXISTS idx_tags_gin     ON models USING GIN(tags);
 -- Unique index for HuggingFace models; NULLs (Civitai rows) are excluded automatically
 -- because PostgreSQL treats each NULL as distinct in a non-partial unique index.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hf_repo_id ON models(hf_repo_id);
+
+-- Unique index for TensorArt models; NULLs excluded (same semantics as idx_hf_repo_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tensorart_model_id ON models(tensorart_model_id) WHERE tensorart_model_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS base_model_index (
     id               BIGSERIAL PRIMARY KEY,
