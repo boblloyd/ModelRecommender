@@ -4,12 +4,25 @@ A local AI image generation model discovery and recommendation tool. Give it a n
 
 Designed to run when ComfyUI is idle — the LLM and ComfyUI share GPU and cannot run simultaneously on 16 GB VRAM. Use this tool to plan your generation, then switch to ComfyUI to execute it.
 
-> **New here?** See [INSTALLATION.md](INSTALLATION.md) to set up the database, Ollama, and the catalog before running any queries.
+**Interfaces:**
+- **Web UI** — React app at `http://localhost:3000` (Docker Compose) or `http://<node-ip>:30766` (Kubernetes)
+- **REST API** — FastAPI at `http://localhost:8765` with Swagger docs at `/docs`
+- **CLI** — `python cli.py "your prompt"` for terminal or scripting use
+
+> **New here?** See [INSTALLATION.md](INSTALLATION.md) — Docker Compose (single machine) and Kubernetes (persistent server) are the two supported deployment paths.
 
 ---
 
 ## Quick start
 
+**Via the web UI** (recommended):
+```bash
+docker compose up -d
+# Open http://localhost:3000
+```
+Seed the catalog first via the **Catalog** tab → Add Base Model → "Flux.1 D" → Crawl.
+
+**Via the CLI:**
 ```bash
 # Activate your virtual environment (see INSTALLATION.md)
 source .venv/bin/activate          # Linux / macOS
@@ -155,6 +168,29 @@ If Ollama is unavailable, the tool degrades gracefully — you still get scored 
 
 ---
 
+## Web UI
+
+The React frontend is included in the Docker Compose and Kubernetes deployments. It runs as a separate nginx container that proxies API calls to the backend.
+
+| Deployment | URL |
+|---|---|
+| Docker Compose | http://localhost:3000 |
+| Kubernetes | http://\<node-ip\>:30766 |
+
+**Recommend tab** — enter a prompt, choose a base model, and get ranked results. Displays the phase indicator, extracted intent tags, "Add to your prompt" (with copy button), the recommended combination, and cards for each checkpoint and LoRA (with impact badge, compatibility note, suggested weight, and trigger words).
+
+**Catalog tab** — shows indexing status per base model (model count, last-crawled date). Provides Update (incremental) and Re-crawl (full) buttons for each, a form to add and crawl a new base model, and a file picker for TensorArt JSON imports.
+
+For local development without Docker:
+```bash
+cd frontend
+npm install
+VITE_API_URL=http://localhost:8765 npm run dev
+# Open http://localhost:5173
+```
+
+---
+
 ## REST API
 
 The same pipeline is available as a REST API. Start the server:
@@ -221,9 +257,22 @@ All sources are scored and ranked together. There is no source-level preference.
 ├── db/
 │   ├── schema.sql                PostgreSQL schema (applied automatically on first run)
 │   └── database.py               asyncpg connection pool
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx               Tab layout (Recommend / Catalog)
+│   │   ├── api/client.js         fetch wrapper — relative paths, proxied by nginx
+│   │   └── components/
+│   │       ├── PromptForm.jsx    Prompt input, model selector, options
+│   │       ├── ResultsPanel.jsx  Checkpoints, LoRAs, combination, prompt additions
+│   │       └── CatalogPanel.jsx  Crawl status table, add model, TensorArt import
+│   ├── Dockerfile                Multi-stage: Node build → nginx serve
+│   └── nginx.conf                Proxies /recommend /cache /catalog to the API service
+├── k8s/
+│   ├── frontend/                 Deployment (NodePort 30766) + Service manifests
+│   └── ...                       API, Postgres, crawler manifests
 ├── tests/                        227 tests, 93% coverage — all mocked, no network/DB required
 ├── cli.py                        Command-line interface
-├── docker-compose.yml            Local dev stack (PostgreSQL + API)
+├── docker-compose.yml            Local dev stack (PostgreSQL + API + UI)
 ├── .env.example                  Environment variable template
 ├── README.md                     This file
 ├── INSTALLATION.md               Setup guide
@@ -234,5 +283,5 @@ All sources are scored and ranked together. There is no source-level preference.
 
 ## Further reading
 
-- **[INSTALLATION.md](INSTALLATION.md)** — prerequisites, Python environment, database, Ollama models, first crawl
+- **[INSTALLATION.md](INSTALLATION.md)** — Docker Compose and Kubernetes setup, Ollama configuration, seeding the catalog
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** — CI pipeline, running tests, code coverage, Kubernetes deployment

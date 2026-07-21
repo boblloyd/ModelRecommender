@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS models (
     date_updated        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ---------------------------------------------------------------------------
+-- Additive migrations — run before indexes so new columns exist before any
+-- index that references them. ADD COLUMN IF NOT EXISTS is idempotent: it is
+-- a no-op on fresh installs (column already in CREATE TABLE above) and adds
+-- the column on existing databases that predate the change.
+-- ---------------------------------------------------------------------------
+ALTER TABLE models ADD COLUMN IF NOT EXISTS tensorart_model_id TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_base_model   ON models(base_model);
 CREATE INDEX IF NOT EXISTS idx_type         ON models(type);
 CREATE INDEX IF NOT EXISTS idx_source       ON models(source);

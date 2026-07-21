@@ -49,6 +49,14 @@ services:
       # Mount source so changes reflect without rebuilding (dev only)
       - .:/app
 
+  ui:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
   # Profile-gated crawler: starts on demand, exits when done.
   # In production, this role is played by a Kubernetes Job.
   crawler:

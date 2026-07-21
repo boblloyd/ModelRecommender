@@ -1,119 +1,40 @@
 # Installation
 
-This guide covers everything from a fresh machine to a working `python cli.py "your prompt"`.
+Two deployment paths are supported. Choose the one that fits your setup:
+
+| | **Docker Compose** | **Kubernetes (k3s)** |
+|---|---|---|
+| **Best for** | Single machine, local use | Persistent server, always-on API |
+| **PostgreSQL** | Managed by Compose | Deployed as a k8s Deployment |
+| **Crawler** | Profile-gated one-shot container | Dispatched as k8s Jobs by the API |
+| **API access** | `http://localhost:8765` | `http://<node-ip>:30765` |
+| **Web UI access** | `http://localhost:3000` | `http://<node-ip>:30766` |
+| **Complexity** | Low | Medium |
+
+**Ollama always runs on the host** — not in Docker or Kubernetes — because it needs direct GPU access. Both paths reach it via a configurable `OLLAMA_HOST` address.
+
+**VRAM note:** Ollama and ComfyUI share the GPU and cannot run simultaneously on a 16 GB card. ModelRecommender is a planning tool — run it when ComfyUI is idle.
 
 ---
 
-## Prerequisites
+## Common prerequisites
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Python | 3.10+ | 3.11+ recommended |
-| PostgreSQL | 14+ | Or Docker — see step 3 |
-| Ollama | Latest | Must be installed on the host with GPU access |
-| CivitAI API token | — | Free; get one at civitai.com → Account → Settings → API Keys |
+| Docker | 24+ | Required for both paths |
+| Ollama | Latest | On the host machine, not in a container |
+| CivitAI API token | — | Free; civitai.com → Account → Settings → API Keys |
 | HuggingFace token | — | Optional; only needed to crawl HuggingFace models |
-| Docker | — | Optional; simplifies PostgreSQL setup |
-
-**VRAM note:** Ollama and ComfyUI share the GPU and cannot run at the same time on a 16 GB card. ModelRecommender is a planning tool — run it when ComfyUI is idle, then close Ollama before launching ComfyUI for generation.
-
----
-
-## Step 1 — Clone the repository
-
-```bash
-git clone https://github.com/your-org/ModelRecommender.git
-cd ModelRecommender
-```
+| k3s / kubectl | Latest | Kubernetes path only |
+| Python 3.10+ | — | Only needed to run the CLI locally (see [Running the CLI](#running-the-cli)) |
 
 ---
 
-## Step 2 — Create a Python virtual environment
+## Ollama setup (required for both paths)
 
-```bash
-# Create
-python -m venv .venv
+Ollama must be installed on the host machine so it has direct GPU access. The Docker and Kubernetes containers reach it over the network.
 
-# Activate (Linux / macOS)
-source .venv/bin/activate
-
-# Activate (Windows PowerShell)
-.venv\Scripts\Activate.ps1
-
-# Install runtime dependencies
-pip install -r requirements.txt
-```
-
-To run tests, also install the dev dependencies:
-
-```bash
-pip install -r requirements-dev.txt
-```
-
----
-
-## Step 3 — Set up PostgreSQL
-
-Choose one of the options below.
-
-### Option A: Docker Compose (easiest)
-
-```bash
-# Starts PostgreSQL on port 5432 with the credentials from docker-compose.yml
-docker compose up -d postgres
-
-# Verify it started
-docker compose ps
-```
-
-### Option B: Local PostgreSQL
-
-If you have PostgreSQL installed:
-
-```bash
-# Create the database and user
-psql -U postgres -c "CREATE USER recommender WITH PASSWORD 'recommender';"
-psql -U postgres -c "CREATE DATABASE model_catalog OWNER recommender;"
-```
-
-Adjust the credentials to match what you put in `.env` (step 4).
-
----
-
-## Step 4 — Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` and fill in the values:
-
-```env
-# Required
-CIVITAI_API_TOKEN=your_civitai_api_token_here
-DATABASE_URL=postgresql://recommender:recommender@localhost:5432/model_catalog
-
-# Required for LLM features
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL_PRIMARY=dolphin3.0-llama3.1:8b
-OLLAMA_MODEL_FALLBACK=gemma3:12b
-
-# Optional — only needed to crawl HuggingFace
-HF_TOKEN=your_huggingface_token_here
-```
-
-**Never commit `.env` to source control.** It is listed in `.gitignore`.
-
-**Finding your CivitAI token:**
-1. Log in at [civitai.com](https://civitai.com)
-2. Go to Account → Settings → API Keys
-3. Create a new key and copy it
-
----
-
-## Step 5 — Install and configure Ollama
-
-Ollama must be installed directly on the host (not in Docker) so it has GPU access.
+**Install Ollama:**
 
 ```bash
 # Linux
@@ -126,152 +47,362 @@ brew install ollama
 # Download the installer from https://ollama.ai
 ```
 
-Pull the LLM models this tool uses:
+**Pull the required models:**
 
 ```bash
-# Primary model — uncensored Llama 3.1 8B, fits in 16 GB alongside other work
+# Primary — uncensored Llama 3.1 8B; fits alongside other GPU work in 16 GB
 ollama pull dolphin3.0-llama3.1:8b
 
-# Fallback model — higher reasoning quality, use when ComfyUI is not loaded
+# Fallback — higher reasoning quality; use when ComfyUI is not loaded
 ollama pull gemma3:12b
 ```
 
-Make sure Ollama is running before using the CLI or API:
+**Start Ollama and verify it is reachable:**
 
 ```bash
 ollama serve
-```
 
-You can verify it is reachable:
-
-```bash
 curl http://localhost:11434/api/tags
+# Should return a JSON list of your pulled models
 ```
 
 ---
 
-## Step 6 — Seed the catalog
+## Option A: Docker Compose
 
-The database schema is applied automatically on first use. The following command creates the schema and populates it with models for Flux.1 D from CivitAI. This takes several minutes depending on how many models exist in the catalog.
+The quickest path for a single machine. PostgreSQL and the API run in containers; Ollama stays on the host.
 
-```bash
-python cli.py --crawl "Flux.1 D"
-```
-
-To add additional base models:
+### 1. Clone the repository
 
 ```bash
-python cli.py --crawl "SDXL 1.0"
-python cli.py --crawl "Pony"
+git clone https://github.com/your-org/ModelRecommender.git
+cd ModelRecommender
 ```
 
-Check what is cached:
+### 2. Configure secrets
 
 ```bash
-python cli.py --status
+cp .env.example .env
 ```
 
-Expected output:
+Edit `.env` — at minimum, set these three values:
 
-```
-Total models in catalog: 4823
-
-  Flux.1 D              COMPLETE    4823 models  last: 2026-07-21 14:30
-```
-
----
-
-## Step 7 — Verify the installation
-
-```bash
-python cli.py "two knights swordfighting in heavy rain"
+```env
+CIVITAI_API_TOKEN=your_civitai_api_token_here
+DATABASE_URL=postgresql://recommender:recommender@localhost:5432/model_catalog
+OLLAMA_HOST=http://localhost:11434
 ```
 
-You should see a formatted recommendations block. If Ollama is running and the primary model is loaded, the `Phase` line will read `2b — LLM intent + compatibility analysis`. If Ollama is not running, it degrades to `1 — stop-word fallback` and still returns scored results.
+`DATABASE_URL` uses `localhost` because the CLI connects from the host. The API container uses the internal `postgres` hostname automatically (pre-configured in `docker-compose.yml`).
 
----
+**Never commit `.env` to source control.** It is listed in `.gitignore`.
 
-## Optional: Import TensorArt models
-
-If you use TensorArt and have the [TamperMonkey export script](https://github.com/your-repo/tensor_art_capture.user.js) installed:
-
-1. Browse to a model page on TensorArt in your browser
-2. Click the TamperMonkey export button — this captures the model's metadata
-3. Export the collected data as JSON
-4. Import it:
-
-```bash
-python cli.py --import-tensorart tensor_art_export.json
-```
-
-Imported models appear in recommendation results alongside CivitAI and HuggingFace models.
-
----
-
-## Optional: Run the REST API
-
-```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8765 --reload
-```
-
-Swagger UI: **http://localhost:8765/docs**
-Health check: **http://localhost:8765/health**
-
-### Full stack with Docker Compose
-
-Starts PostgreSQL and the API together:
+### 3. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-The API will be available at **http://localhost:8765**. Ollama still runs on the host and is reached from Docker via `host.docker.internal:11434` (configured automatically in `docker-compose.yml`).
+This starts PostgreSQL, the API, and the web UI. The API applies the database schema automatically on startup.
 
-To run a crawl inside the compose environment:
+Verify:
 
 ```bash
+docker compose ps
+curl http://localhost:8765/health
+# {"status":"ok"}
+```
+
+- **Web UI**: http://localhost:3000
+- **Swagger UI**: http://localhost:8765/docs
+
+### 4. Seed the catalog
+
+Run a one-shot crawler container to populate the catalog. This takes several minutes — CivitAI has thousands of models per base model.
+
+```bash
+# Full crawl for Flux.1 D
 CIVITAI_API_TOKEN=your_token CRAWL_BASE_MODEL="Flux.1 D" \
+  docker compose --profile crawl run --rm crawler
+
+# Add more base models as needed
+CIVITAI_API_TOKEN=your_token CRAWL_BASE_MODEL="SDXL 1.0" \
+  docker compose --profile crawl run --rm crawler
+```
+
+Check what was cached:
+
+```bash
+curl http://localhost:8765/cache/status
+```
+
+Expected:
+
+```json
+{
+  "total_models_cached": 4823,
+  "base_models": [
+    {"base_model_name": "Flux.1 D", "crawl_complete": true, "total_models": 4823}
+  ]
+}
+```
+
+### 5. Get recommendations
+
+**Via the API** (no local Python required):
+
+```bash
+curl -s -X POST http://localhost:8765/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "two knights swordfighting in heavy rain", "base_model": "Flux.1 D"}' \
+  | python -m json.tool
+```
+
+**Via the CLI** (runs inside the API container):
+
+```bash
+docker compose exec api python cli.py "two knights swordfighting in heavy rain"
+
+# With flags
+docker compose exec api python cli.py "your prompt" --no-llm
+docker compose exec api python cli.py "your prompt" --json
+docker compose exec api python cli.py --status
+```
+
+### 6. Import TensorArt models
+
+Use the API's upload endpoint — no need to copy files into the container:
+
+```bash
+curl -X POST http://localhost:8765/catalog/import/tensorart \
+  -F "file=@tensor_art_export.json"
+```
+
+Or via the Swagger UI at **http://localhost:8765/docs** → `POST /catalog/import/tensorart`.
+
+### 7. Keep the catalog fresh
+
+```bash
+# Incremental update — only fetches models added since the last crawl (fast)
+CIVITAI_API_TOKEN=your_token CRAWL_BASE_MODEL="Flux.1 D" CRAWL_MODE=incremental \
   docker compose --profile crawl run --rm crawler
 ```
 
 ---
 
-## Optional: Kubernetes deployment
+## Option B: Kubernetes (k3s)
 
-For persistent server deployment on Ubuntu with k3s, see [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#kubernetes-deployment-ubuntu-single-node). The key difference from local dev is that Ollama must be reachable from inside the cluster — set `OLLAMA_HOST` in `k8s/secret.yaml` to your node's LAN IP (e.g. `http://192.168.1.x:11434`), not `localhost`.
+For a persistent server deployment on Ubuntu. The API and PostgreSQL run as Deployments; crawlers run as on-demand Jobs dispatched by the API itself.
+
+### 1. Clone and build the image
+
+```bash
+git clone https://github.com/your-org/ModelRecommender.git
+cd ModelRecommender
+
+docker build -t model-recommender:latest .
+```
+
+Import the image into k3s containerd (bypasses a registry):
+
+```bash
+docker save model-recommender:latest | sudo k3s ctr images import -
+```
+
+### 2. Create the namespace
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+```
+
+### 3. Configure secrets
+
+Copy the example and fill in your values:
+
+```bash
+cp k8s/secret.example.yaml k8s/secret.yaml
+```
+
+Edit `k8s/secret.yaml`:
+
+```yaml
+stringData:
+  database-url: "postgresql://recommender:your_password@postgres:5432/model_catalog"
+  postgres-password: "your_password"
+  civitai-api-token: "your_civitai_token"
+  hf-token: "your_hf_token"              # leave as CHANGE_ME if not using HuggingFace
+  ollama-host: "http://192.168.1.x:11434" # your node's LAN IP — NOT localhost
+```
+
+`ollama-host` must be the node's LAN IP address, not `localhost`, because the API pod reaches Ollama over the host network.
+
+Apply the secret:
+
+```bash
+kubectl apply -f k8s/secret.yaml
+```
+
+**`k8s/secret.yaml` is listed in `.gitignore` and must never be committed.**
+
+### 4. Build and import the UI image
+
+```bash
+docker build -t model-recommender-ui:latest ./frontend
+docker save model-recommender-ui:latest | sudo k3s ctr images import -
+```
+
+### 5. Apply all manifests
+
+Order matters — PostgreSQL must be running before the API starts:
+
+```bash
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/postgres/
+kubectl apply -f k8s/api/
+kubectl apply -f k8s/frontend/
+kubectl apply -f k8s/crawler/cronjob.yaml   # scheduled incremental updates
+```
+
+Wait for everything to be ready:
+
+```bash
+kubectl rollout status deployment/model-recommender-api -n model-recommender
+kubectl rollout status deployment/model-recommender-ui  -n model-recommender
+```
+
+- **Web UI**: http://\<node-ip\>:30766
+- **Swagger UI**: http://\<node-ip\>:30765/docs
+
+### 6. Seed the catalog
+
+Apply the one-shot crawler Job and follow its logs:
+
+```bash
+kubectl apply -f k8s/crawler/job.yaml
+kubectl logs -n model-recommender -l job-name=civitai-crawl-flux1d -f
+```
+
+After the job completes, verify via the API:
+
+```bash
+curl http://<node-ip>:30765/cache/status
+```
+
+For additional base models, trigger crawls through the API — it dispatches a new Job automatically:
+
+```bash
+curl -X POST http://<node-ip>:30765/cache/crawl \
+  -H "Content-Type: application/json" \
+  -d '{"base_model": "SDXL 1.0", "mode": "full"}'
+```
+
+### 7. Get recommendations
+
+Open the **web UI** at http://\<node-ip\>:30766 — enter a prompt, select a base model, and click Get Recommendations.
+
+Alternatively, via curl:
+
+```bash
+curl -s -X POST http://<node-ip>:30765/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "two knights swordfighting in heavy rain", "base_model": "Flux.1 D"}' \
+  | python -m json.tool
+```
+
+Or exec into the API pod for CLI access:
+
+```bash
+kubectl exec -n model-recommender deployment/model-recommender-api -- \
+  python cli.py "two knights swordfighting in heavy rain"
+```
+
+### 8. Import TensorArt models
+
+Use the **Catalog** tab in the web UI, or the upload endpoint directly:
+
+```bash
+curl -X POST http://<node-ip>:30765/catalog/import/tensorart \
+  -F "file=@tensor_art_export.json"
+```
+
+### 9. Keep the catalog fresh
+
+The CronJob at `k8s/crawler/cronjob.yaml` runs incremental updates on a schedule automatically. To trigger one manually:
+
+```bash
+kubectl create job --from=cronjob/civitai-incremental-update manual-update \
+  -n model-recommender
+kubectl logs -n model-recommender -l job-name=manual-update -f
+```
+
+### Rebuild and redeploy after code changes
+
+```bash
+# API
+docker build -t model-recommender:latest .
+docker save model-recommender:latest | sudo k3s ctr images import -
+kubectl rollout restart deployment/model-recommender-api -n model-recommender
+
+# UI
+docker build -t model-recommender-ui:latest ./frontend
+docker save model-recommender-ui:latest | sudo k3s ctr images import -
+kubectl rollout restart deployment/model-recommender-ui -n model-recommender
+```
 
 ---
 
-## Keeping the catalog fresh
+## Running the CLI locally
 
-The catalog does not update automatically. Run incremental updates periodically to pick up newly published models:
+If you want to run `python cli.py` directly on the host (for development, or when Docker Compose is managing only PostgreSQL), set up a local Python environment:
 
 ```bash
-# Updates only — much faster than a full crawl
-python cli.py --crawl "Flux.1 D" --mode incremental
+python -m venv .venv
+source .venv/bin/activate        # Linux / macOS
+.venv\Scripts\Activate.ps1       # Windows PowerShell
+
+pip install -r requirements.txt
 ```
 
-A full re-crawl is only needed if you want to reset the catalog or if the model count seems significantly lower than CivitAI shows.
+Ensure `DATABASE_URL` in `.env` points to the running PostgreSQL instance (Docker Compose's on `localhost:5432`, or your remote k8s cluster via a port-forward).
+
+```bash
+# Port-forward the k8s PostgreSQL for local CLI access
+kubectl port-forward -n model-recommender svc/postgres 5432:5432 &
+
+# Then run the CLI normally
+python cli.py "two knights swordfighting in heavy rain"
+```
+
+For running tests, also install dev dependencies:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Tests are fully mocked — no database, Ollama, or network access required to run the suite.
 
 ---
 
 ## Troubleshooting
 
 **`ERROR: 'Flux.1 D' is not in the cache yet.`**
-Run `python cli.py --crawl "Flux.1 D"` first.
+The catalog hasn't been populated. Run the crawler (step 4 in whichever path you chose).
 
-**`Phase: 1 — stop-word fallback` (instead of 2b)**
-Ollama is not running or the primary model is not loaded. Run `ollama serve` and `ollama pull dolphin3.0-llama3.1:8b`, then retry.
+**`Phase: 1 — stop-word fallback` instead of `2b`**
+Ollama is not running, the model is not loaded, or `OLLAMA_HOST` points to the wrong address. Verify with `curl $OLLAMA_HOST/api/tags`. In Kubernetes, make sure `ollama-host` in the Secret uses the node's LAN IP, not `localhost`.
 
-**`asyncpg.exceptions.InvalidPasswordError` or connection refused**
-Check that PostgreSQL is running and that `DATABASE_URL` in `.env` matches your database credentials.
+**API returns 409 on `/recommend`**
+The requested `base_model` is not yet cached. Call `POST /cache/crawl` first.
 
-**Crawl stalls or returns 429 errors**
-CivitAI rate-limits unauthenticated and occasionally authenticated requests. The crawler retries with exponential backoff automatically. If it stalls for more than a few minutes, press Ctrl+C and re-run — the catalog is populated incrementally and the next run picks up where it left off via the incremental mode.
+**`asyncpg` connection refused or invalid password**
+PostgreSQL is not running, or `DATABASE_URL` / `database-url` credentials don't match. Check `docker compose ps` or `kubectl get pods -n model-recommender`.
+
+**Crawl stalls or gets 429 errors**
+CivitAI rate-limits requests. The crawler retries automatically with exponential backoff. If it doesn't recover after a few minutes, interrupt and re-run — the catalog is populated incrementally and won't lose progress.
 
 **`RuntimeError: Form data requires "python-multipart"`**
-The TensorArt import endpoint requires `python-multipart`. Install it:
-```bash
-pip install python-multipart
-```
-It is already listed in `requirements.txt` — this usually means you're running without the virtualenv active.
+Only occurs when running the API outside Docker/k8s. The package is in `requirements.txt` — activate your virtualenv before running `uvicorn`.
+
+**Image not found in k3s after rebuild**
+Re-import after every rebuild: `docker save model-recommender:latest | sudo k3s ctr images import -`. k3s does not pull from the Docker daemon; it reads from its own containerd store.
